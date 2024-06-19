@@ -948,7 +948,7 @@ cdef _export_obj_pl_dataframe(obj):
     except AttributeError:
         table_metadata = {}
 
-    polars_schema = obj.scehma
+    polars_schema = obj.schema
     #export_column_names = obj.scehma
     #polars_datatypes = obj.dtypes
     column_names = []
