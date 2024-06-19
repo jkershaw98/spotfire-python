@@ -967,11 +967,11 @@ cdef _export_obj_pl_dataframe(obj):
         context = _ExportContext()
         context.set_valuetype_id(_export_infer_valuetype_from_polars_dtype(polars_dtype, f"column '{col}'"))
         
-        if context.get_valuetype_id() == sbdf_c.SBDF_STRINGTYPEID:
-            values = obj[col].to_numpy()
-        else:
+        if context.get_valuetype_id() in [sbdf_c.SBDF_INTTYPEID, sbdf_c.SBDF_LONGTYPEID, sbdf_c.SBDF_FLOATTYPEID, sbdf_c.SBDF_DOUBLETYPEID, sbdf_c.SBDF_BOOLTYPEID]:
             na_value = context.get_numpy_na_value()
             values = obj[col].fill_null(na_value).to_numpy()
+        else:
+            values = obj[col].to_numpy()
 
         #nas = {None: na_value,
         #       np.nan: na_value,
