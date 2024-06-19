@@ -26,6 +26,7 @@ cimport numpy as np_c
 from vendor cimport sbdf_c
 
 from tqdm.notebook import tqdm
+import polars as pl
 
 
 # Dynamically load optional modules
@@ -930,6 +931,67 @@ cdef _export_obj_dataframe(obj):
 
     return table_metadata, column_names, column_metadata, exporter_contexts
 
+cdef _export_obj_pl_dataframe(obj):
+    """Extract column information for a Pandas ``DataFrame``.
+
+    :param obj: DataFrame object to export
+    :return: tuple containing dictionary of table metadata, list of column names, list of dictionaries of column
+              metadata, and list of export context objects
+    """
+    #Doesn't look like polars can use non-unique column names, so remove this check
+    #if len(set(obj.keys().to_list())) != len(obj.columns):
+    #    raise SBDFError("obj does not have unique column names")
+
+    # Table/column metadata and column information
+    try:
+        table_metadata = obj.spotfire_table_metadata
+    except AttributeError:
+        table_metadata = {}
+
+    polars_schema = obj.scehma
+    #export_column_names = obj.scehma
+    #polars_datatypes = obj.dtypes
+    column_names = []
+    column_metadata = []
+    exporter_contexts = []
+
+    for col, polars_dtype in polars_schema.items():
+        #polars doesn't support this yet, maybe come back to https://github.com/geopolars/geopolars later
+        #if obj[col].dtype == 'geometry':
+        #    # Special case for the 'geometry' dtype from geopandas
+        #    _export_obj_geodataframe_geometry(obj[col], obj.crs, table_metadata, column_names, column_metadata,
+        #                                      exporter_contexts)
+        #else:
+        # Normal columns
+        column_names.append(col)
+        context = _ExportContext()
+        context.set_valuetype_id(_export_infer_valuetype_from_polars_dtype(polars_dtype, f"column '{col}'"))
+        
+        if context.get_valuetype_id() == sbdf_c.SBDF_STRINGTYPEID:
+            values = obj[col].to_numpy()
+        else:
+            na_value = context.get_numpy_na_value()
+            values = obj[col].fill_null(na_value).to_numpy()
+
+        #nas = {None: na_value,
+        #       np.nan: na_value,
+        #       pd.NA: na_value,
+        #       pd.NaT: na_value,
+        #       }
+        #if obj[col].dtype == "object":
+        #    values = obj[col].replace(nas).to_numpy()
+        #else:
+        
+
+        invalids = obj[col].is_null().to_numpy()
+        
+        context.set_arrays(values, invalids)
+        exporter_contexts.append(context)
+        
+        column_metadata.append({})
+
+    return table_metadata, column_names, column_metadata, exporter_contexts
+
 
 cdef void _export_obj_geodataframe_geometry(geometry, geometry_crs, table_metadata, column_names, column_metadata,
                                             exporter_contexts):
@@ -1515,6 +1577,34 @@ cdef int _export_infer_valuetype_from_pandas_dtype(series, series_description):
     else:
         raise SBDFError(f"unknown dtype '{dtype}' in {series_description}")
 
+cdef int _export_infer_valuetype_from_polars_dtype(schema_dtype, series_description):
+    """Determine a value type for a data set based on the Pandas dtype for the series.
+
+    :param series: the values to infer the value type of
+    :param series_description: description of series (for error reporting)
+    :return: the integer value type id representing the type of series
+    :raise SBDFError: if the types of values are mixed, all missing, or unknown
+    """
+
+    if schema_dtype == pl.datatypes.Boolean:
+        return sbdf_c.SBDF_BOOLTYPEID
+    elif schema_dtype == pl.datatypes.Int32:
+        return sbdf_c.SBDF_INTTYPEID
+    elif schema_dtype == pl.datatypes.Int64:
+        return sbdf_c.SBDF_LONGTYPEID
+    elif schema_dtype == pl.datatypes.Float32:
+        return sbdf_c.SBDF_FLOATTYPEID
+    elif schema_dtype == pl.datatypes.Float64:
+        return sbdf_c.SBDF_DOUBLETYPEID
+    elif schema_dtype.base_type() == pl.datatypes.Datetime:
+        return sbdf_c.SBDF_DATETIMETYPEID
+    elif schema_dtype.base_type() == pl.datatypes.Duration:
+        return sbdf_c.SBDF_TIMESPANTYPEID
+    elif schema_dtype == pl.datatypes.String:
+        return sbdf_c.SBDF_STRINGTYPEID
+    else:
+        raise SBDFError(f"unknown dtype '{schema_dtype}' in {series_description}")
+
 
 cdef object _VT_CONVERSIONS_ALL = [sbdf_c.SBDF_BOOLTYPEID, sbdf_c.SBDF_STRINGTYPEID]
 cdef object _VT_CONVERSIONS_NUMERIC = [sbdf_c.SBDF_BOOLTYPEID, sbdf_c.SBDF_INTTYPEID, sbdf_c.SBDF_LONGTYPEID,
@@ -1780,6 +1870,9 @@ def export_data(obj, sbdf_file, default_column_name="x", Py_ssize_t rows_per_sli
         # Pandas Series (columnar)
         elif isinstance(obj, pd.Series):
             exported = _export_obj_series(obj, default_column_name)
+
+        elif isinstance(obj, pl.DataFrame):
+            exported = _export_obj_pl_dataframe(obj)
         # NumPy Array (columnar)
         elif isinstance(obj, np_c.ndarray):
             exported = _export_obj_numpy(obj, default_column_name)
