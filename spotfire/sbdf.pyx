@@ -2087,26 +2087,25 @@ def export_chunked_data(sbdf_file, default_column_name="x", Py_ssize_t rows_per_
                     raise SBDFError(f"cannot create table metadata: {sbdf_c.sbdf_err_get_str(error).decode('utf-8')}")
                 sbdf_c.sbdf_md_destroy(table_md)
                 
-            num_columns = len(column_names)
-            for i in range(num_columns):
-                if i == 0:
-                    row_count = len(exporter_contexts[i])
-                else:
-                    if row_count != len(exporter_contexts[i]):
-                        raise SBDFError(f"column '{column_names[i]}' has inconsistent column length")
-                col = str(column_names[i]).encode('utf-8')
-                col_md = _export_metadata(column_metadata[i], i)
-                col_vt.id = exporter_contexts[i].get_valuetype_id()
-                error = sbdf_c.sbdf_cm_set_values(col, col_vt, col_md)
-                if error != sbdf_c.SBDF_OK:
-                    raise SBDFError(f"cannot create column metadata: {sbdf_c.sbdf_err_get_str(error).decode('utf-8')}")
-                error = sbdf_c.sbdf_tm_add(col_md, table_meta)
-                if error != sbdf_c.SBDF_OK:
-                    raise SBDFError(f"cannot add column metadata: {sbdf_c.sbdf_err_get_str(error).decode('utf-8')}")
-                sbdf_c.sbdf_md_destroy(col_md)
+                num_columns = len(column_names)
+                for i in range(num_columns):
+                    if i == 0:
+                        row_count = len(exporter_contexts[i])
+                    else:
+                        if row_count != len(exporter_contexts[i]):
+                            raise SBDFError(f"column '{column_names[i]}' has inconsistent column length")
+                    col = str(column_names[i]).encode('utf-8')
+                    col_md = _export_metadata(column_metadata[i], i)
+                    col_vt.id = exporter_contexts[i].get_valuetype_id()
+                    error = sbdf_c.sbdf_cm_set_values(col, col_vt, col_md)
+                    if error != sbdf_c.SBDF_OK:
+                        raise SBDFError(f"cannot create column metadata: {sbdf_c.sbdf_err_get_str(error).decode('utf-8')}")
+                    error = sbdf_c.sbdf_tm_add(col_md, table_meta)
+                    if error != sbdf_c.SBDF_OK:
+                        raise SBDFError(f"cannot add column metadata: {sbdf_c.sbdf_err_get_str(error).decode('utf-8')}")
+                    sbdf_c.sbdf_md_destroy(col_md)
                 
                 
-            if is_first_obj:
                 error = sbdf_c.sbdf_fh_write_cur(output_file)
                 if error != sbdf_c.SBDF_OK:
                     raise SBDFError(f"error writing '{sbdf_file}': {sbdf_c.sbdf_err_get_str(error).decode('utf-8')}")
