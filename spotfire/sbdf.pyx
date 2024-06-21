@@ -2016,9 +2016,9 @@ def export_data(obj, sbdf_file, default_column_name="x", Py_ssize_t rows_per_sli
             stdio.fclose(output_file)
 
 def export_chunked_data(obj, sbdf_file, default_column_name="x", Py_ssize_t rows_per_slice=0, encoding_rle=True):
-	'''A generator that allows for sending of multiple objects to be exportered to a SBDF file
-	'''
-	cdef int i
+    '''A generator that allows for sending of multiple objects to be exportered to a SBDF file
+    '''
+    cdef int i
     cdef stdio.FILE* output_file = NULL
     cdef sbdf_c.sbdf_metadata_head* table_md = NULL
     cdef sbdf_c.sbdf_tablemetadata* table_meta = NULL
@@ -2036,10 +2036,10 @@ def export_chunked_data(obj, sbdf_file, default_column_name="x", Py_ssize_t rows
     cdef sbdf_c.sbdf_valuearray* value_array = NULL
     cdef sbdf_c.sbdf_columnslice* col_slice = NULL
     cdef sbdf_c.sbdf_valuearray* invalid_array = NULL
-	
-	try:
-		output_file = _pathlike_to_fileptr(sbdf_file, "wb")
-		is_first_obj = True
+    
+    try:
+        output_file = _pathlike_to_fileptr(sbdf_file, "wb")
+        is_first_obj = True
         
         while True:
             obj = yield
@@ -2183,7 +2183,7 @@ def export_chunked_data(obj, sbdf_file, default_column_name="x", Py_ssize_t rows
                 
                 is_first_obj = False
         
-	finally:
+    finally:
     # Write the end-of-table marker
         error = sbdf_c.sbdf_ts_write_end(output_file)
         if error != sbdf_c.SBDF_OK:
