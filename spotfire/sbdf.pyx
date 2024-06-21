@@ -2015,7 +2015,7 @@ def export_data(obj, sbdf_file, default_column_name="x", Py_ssize_t rows_per_sli
         if output_file != NULL:
             stdio.fclose(output_file)
 
-def export_chunked_data(obj, sbdf_file, default_column_name="x", Py_ssize_t rows_per_slice=0, encoding_rle=True):
+def export_chunked_data(sbdf_file, default_column_name="x", Py_ssize_t rows_per_slice=0, encoding_rle=True):
     '''A generator that allows for sending of multiple objects to be exportered to a SBDF file
     '''
     cdef int i
