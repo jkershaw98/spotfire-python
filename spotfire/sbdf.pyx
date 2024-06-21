@@ -2051,6 +2051,9 @@ def export_chunked_data(obj, sbdf_file, default_column_name="x", Py_ssize_t rows
             # Pandas Series (columnar)
             elif isinstance(obj, pd.Series):
                 exported = _export_obj_series(obj, default_column_name)
+            # Polars DataFrames (tabular)
+            elif isinstance(obj, pl.DataFrame):
+                exported = _export_obj_pl_dataframe(obj)
             # NumPy Array (columnar)
             elif isinstance(obj, np_c.ndarray):
                 exported = _export_obj_numpy(obj, default_column_name)
