@@ -2015,6 +2015,184 @@ def export_data(obj, sbdf_file, default_column_name="x", Py_ssize_t rows_per_sli
         if output_file != NULL:
             stdio.fclose(output_file)
 
+def export_chunked_data(obj, sbdf_file, default_column_name="x", Py_ssize_t rows_per_slice=0, encoding_rle=True):
+	'''A generator that allows for sending of multiple objects to be exportered to a SBDF file
+	'''
+	cdef int i
+    cdef stdio.FILE* output_file = NULL
+    cdef sbdf_c.sbdf_metadata_head* table_md = NULL
+    cdef sbdf_c.sbdf_tablemetadata* table_meta = NULL
+    cdef Py_ssize_t num_columns
+    cdef sbdf_c.sbdf_metadata_head* col_md = NULL
+    cdef sbdf_c.sbdf_valuetype col_vt
+    cdef Py_ssize_t row_count = 0
+    cdef Py_ssize_t row_offset = 0
+    cdef _AllocatedList saved_value_arrays
+    cdef _AllocatedList saved_col_slices
+    cdef sbdf_c.sbdf_tableslice* table_slice = NULL
+    cdef exporter_fn exporter
+    cdef sbdf_c.sbdf_object* values = NULL
+    cdef int value_encoding = 0
+    cdef sbdf_c.sbdf_valuearray* value_array = NULL
+    cdef sbdf_c.sbdf_columnslice* col_slice = NULL
+    cdef sbdf_c.sbdf_valuearray* invalid_array = NULL
+	
+	try:
+		output_file = _pathlike_to_fileptr(sbdf_file, "wb")
+		is_first_obj = True
+        
+        while True:
+            obj = yield
+            
+            # Extract data and metadata from obj
+            # Pandas DataFrames (tabular)
+            if isinstance(obj, pd.DataFrame):
+                exported = _export_obj_dataframe(obj)
+            # Pandas Series (columnar)
+            elif isinstance(obj, pd.Series):
+                exported = _export_obj_series(obj, default_column_name)
+            # NumPy Array (columnar)
+            elif isinstance(obj, np_c.ndarray):
+                exported = _export_obj_numpy(obj, default_column_name)
+            # Dicts of Lists (tabular)
+            elif isinstance(obj, dict):
+                exported = _export_obj_dict_of_lists(obj)
+            # Strings and Bytes (scalar)
+            elif isinstance(obj, (str, bytes, bytearray)):
+                exported = _export_obj_scalar(obj, default_column_name)
+            # Iterable (columnar)
+            elif isinstance(obj, collections.abc.Iterable):
+                exported = _export_obj_iterable(obj, default_column_name)
+            # Matplotlib Figures (scalar)
+            elif matplotlib is not None and isinstance(obj, matplotlib.figure.Figure):
+                exported = _export_obj_matplotlib_figure(obj, default_column_name)
+            # Seaborn Grids (scalar)
+            elif seaborn is not None and isinstance(obj, seaborn.axisgrid.Grid):
+                exported = _export_obj_seaborn_grid(obj, default_column_name)
+            # PIL Images (scalar)
+            elif PIL is not None and isinstance(obj, PIL.Image.Image):
+                exported = _export_obj_pil_image(obj, default_column_name)
+            # Try if all else fails (scalar)
+            else:
+                exported = _export_obj_scalar(obj, default_column_name)
+            table_metadata, column_names, column_metadata, exporter_contexts = exported
+            
+            if is_first_obj:
+                table_md = _export_metadata(table_metadata, -1)
+                error = sbdf_c.sbdf_tm_create(table_md, &table_meta)
+                if error != sbdf_c.SBDF_OK:
+                    raise SBDFError(f"cannot create table metadata: {sbdf_c.sbdf_err_get_str(error).decode('utf-8')}")
+                sbdf_c.sbdf_md_destroy(table_md)
+                
+            num_columns = len(column_names)
+            for i in range(num_columns):
+                if i == 0:
+                    row_count = len(exporter_contexts[i])
+                else:
+                    if row_count != len(exporter_contexts[i]):
+                        raise SBDFError(f"column '{column_names[i]}' has inconsistent column length")
+                col = str(column_names[i]).encode('utf-8')
+                col_md = _export_metadata(column_metadata[i], i)
+                col_vt.id = exporter_contexts[i].get_valuetype_id()
+                error = sbdf_c.sbdf_cm_set_values(col, col_vt, col_md)
+                if error != sbdf_c.SBDF_OK:
+                    raise SBDFError(f"cannot create column metadata: {sbdf_c.sbdf_err_get_str(error).decode('utf-8')}")
+                error = sbdf_c.sbdf_tm_add(col_md, table_meta)
+                if error != sbdf_c.SBDF_OK:
+                    raise SBDFError(f"cannot add column metadata: {sbdf_c.sbdf_err_get_str(error).decode('utf-8')}")
+                sbdf_c.sbdf_md_destroy(col_md)
+                
+                
+            if is_first_obj:
+                error = sbdf_c.sbdf_fh_write_cur(output_file)
+                if error != sbdf_c.SBDF_OK:
+                    raise SBDFError(f"error writing '{sbdf_file}': {sbdf_c.sbdf_err_get_str(error).decode('utf-8')}")
+                    
+                # Write the table metadata
+                error = sbdf_c.sbdf_tm_write(output_file, table_meta)
+                if error != sbdf_c.SBDF_OK:
+                    raise SBDFError(f"error writing '{sbdf_file}': {sbdf_c.sbdf_err_get_str(error).decode('utf-8')}")
+                sbdf_c.sbdf_tm_destroy(table_meta)
+                
+                
+            # Determine the number of rows per slice
+            if rows_per_slice <= 0:
+                rows_per_slice = max(10, 100000 // max(1, num_columns))
+    
+            # Slice the data
+            _allocated_list_new(&saved_col_slices, num_columns)
+            _allocated_list_new(&saved_value_arrays, num_columns * 2)
+            while row_offset < row_count:
+                rows_per_slice = min(rows_per_slice, row_count - row_offset)
+    
+                # Create the table slice
+                error = sbdf_c.sbdf_ts_create(table_meta, &table_slice)
+                if error != sbdf_c.SBDF_OK:
+                    raise SBDFError(f"error creating table slice: {sbdf_c.sbdf_err_get_str(error).decode('utf-8')}")
+    
+                # Add each column to the slice
+                for i in range(num_columns):
+                    values = NULL
+                    context = exporter_contexts[i]
+                    exporter = _export_get_exporter(context.get_valuetype_id())
+                    error = exporter(context, row_offset, rows_per_slice, &values)
+                    if error != sbdf_c.SBDF_OK:
+                        raise SBDFError(f"error exporting column '{column_names[i]}': "
+                                        f"{sbdf_c.sbdf_err_get_str(error).decode('utf-8')}")
+    
+                    # Create the value array
+                    value_encoding = _export_get_value_encoding(context.get_valuetype_id(), encoding_rle)
+                    value_array = NULL
+                    error = sbdf_c.sbdf_va_create(value_encoding, values, &value_array)
+                    if value_array != NULL:
+                        _allocated_list_add(&saved_value_arrays, value_array)
+                    if error != sbdf_c.SBDF_OK:
+                        raise SBDFError(f"error creating value array: {sbdf_c.sbdf_err_get_str(error).decode('utf-8')}")
+                    sbdf_c.sbdf_obj_destroy(values)
+    
+                    # Create a column slice
+                    col_slice = NULL
+                    error = sbdf_c.sbdf_cs_create(&col_slice, value_array)
+                    if col_slice != NULL:
+                        _allocated_list_add(&saved_col_slices, col_slice)
+                    if error != sbdf_c.SBDF_OK:
+                        raise SBDFError(f"error creating column slice: {sbdf_c.sbdf_err_get_str(error).decode('utf-8')}")
+    
+                    # Create the invalid array
+                    error, invalid_array = _export_process_invalid_array(context, row_offset, rows_per_slice, col_slice)
+                    if invalid_array != NULL:
+                        _allocated_list_add(&saved_value_arrays, invalid_array)
+                    if error != sbdf_c.SBDF_OK:
+                        raise SBDFError(f"error exporting invalids: {sbdf_c.sbdf_err_get_str(error).decode('utf-8')}")
+    
+                    # Add the column slice to the table slice
+                    error = sbdf_c.sbdf_ts_add(col_slice, table_slice)
+                    if error != sbdf_c.SBDF_OK:
+                        raise SBDFError(f"error adding column slice: {sbdf_c.sbdf_err_get_str(error).decode('utf-8')}")
+    
+                # Write the table slice
+                error = sbdf_c.sbdf_ts_write(output_file, table_slice)
+                if error != sbdf_c.SBDF_OK:
+                    raise SBDFError(f"error writing table slice: {sbdf_c.sbdf_err_get_str(error).decode('utf-8')}")
+                sbdf_c.sbdf_ts_destroy(table_slice)
+                _allocated_list_done(&saved_col_slices, <_allocated_dealloc_fn>sbdf_c.sbdf_cs_destroy)
+                _allocated_list_done(&saved_value_arrays, <_allocated_dealloc_fn>sbdf_c.sbdf_va_destroy)
+            
+                # Next slice!
+                row_offset += rows_per_slice
+                
+                is_first_obj = False
+        
+	finally:
+    # Write the end-of-table marker
+        error = sbdf_c.sbdf_ts_write_end(output_file)
+        if error != sbdf_c.SBDF_OK:
+            raise SBDFError(f"error writing end of table: {sbdf_c.sbdf_err_get_str(error).decode('utf-8')}")
+        
+        # Close the output file
+        if output_file != NULL:
+            stdio.fclose(output_file)
+
 def convert_csv_to_sbdf(csv_file, sbdf_file, dtypes_dict, Py_ssize_t chunksize=10000, encoding_rle=True, has_typerow=False):
     """Export data to an SBDF file.
     :param obj: the data object to export
