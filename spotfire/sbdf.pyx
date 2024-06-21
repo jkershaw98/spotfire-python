@@ -2090,9 +2090,9 @@ def export_chunked_data(sbdf_file, default_column_name="x", Py_ssize_t rows_per_
                 num_columns = len(column_names)
                 for i in range(num_columns):
                     if i == 0:
-                        row_count = len(exporter_contexts[i])
+                        check_row_count = len(exporter_contexts[i])
                     else:
-                        if row_count != len(exporter_contexts[i]):
+                        if check_row_count != len(exporter_contexts[i]):
                             raise SBDFError(f"column '{column_names[i]}' has inconsistent column length")
                     col = str(column_names[i]).encode('utf-8')
                     col_md = _export_metadata(column_metadata[i], i)
@@ -2116,7 +2116,8 @@ def export_chunked_data(sbdf_file, default_column_name="x", Py_ssize_t rows_per_
                     raise SBDFError(f"error writing '{sbdf_file}': {sbdf_c.sbdf_err_get_str(error).decode('utf-8')}")
                 sbdf_c.sbdf_tm_destroy(table_meta)
                 
-                
+            row_count += len(obj)
+
             # Determine the number of rows per slice
             if rows_per_slice <= 0:
                 rows_per_slice = max(10, 100000 // max(1, num_columns))
@@ -2184,7 +2185,6 @@ def export_chunked_data(sbdf_file, default_column_name="x", Py_ssize_t rows_per_
                 row_offset += rows_per_slice
                 
             is_first_obj = False
-            row_offset = 0
         
     finally:
     # Write the end-of-table marker
