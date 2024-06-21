@@ -2105,7 +2105,7 @@ def export_chunked_data(sbdf_file, default_column_name="x", Py_ssize_t rows_per_
                         raise SBDFError(f"cannot add column metadata: {sbdf_c.sbdf_err_get_str(error).decode('utf-8')}")
                     sbdf_c.sbdf_md_destroy(col_md)
                 
-                
+                # Write the file header
                 error = sbdf_c.sbdf_fh_write_cur(output_file)
                 if error != sbdf_c.SBDF_OK:
                     raise SBDFError(f"error writing '{sbdf_file}': {sbdf_c.sbdf_err_get_str(error).decode('utf-8')}")
@@ -2183,7 +2183,8 @@ def export_chunked_data(sbdf_file, default_column_name="x", Py_ssize_t rows_per_
                 # Next slice!
                 row_offset += rows_per_slice
                 
-                is_first_obj = False
+            is_first_obj = False
+            row_offset = 0
         
     finally:
     # Write the end-of-table marker
