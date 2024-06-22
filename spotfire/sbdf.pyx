@@ -2116,7 +2116,7 @@ def export_chunked_data(sbdf_file, default_column_name="x", Py_ssize_t rows_per_
                     raise SBDFError(f"error writing '{sbdf_file}': {sbdf_c.sbdf_err_get_str(error).decode('utf-8')}")
                 sbdf_c.sbdf_tm_destroy(table_meta)
                 
-            row_count += len(obj)
+            row_count = len(obj)
 
             # Determine the number of rows per slice
             if rows_per_slice <= 0:
@@ -2126,7 +2126,7 @@ def export_chunked_data(sbdf_file, default_column_name="x", Py_ssize_t rows_per_
             _allocated_list_new(&saved_col_slices, num_columns)
             _allocated_list_new(&saved_value_arrays, num_columns * 2)
             while row_offset < row_count:
-                rows_per_slice = min(rows_per_slice, row_count - row_offset)
+                rows_to_export = min(rows_per_slice, row_count - row_offset)
     
                 # Create the table slice
                 error = sbdf_c.sbdf_ts_create(table_meta, &table_slice)
@@ -2138,7 +2138,7 @@ def export_chunked_data(sbdf_file, default_column_name="x", Py_ssize_t rows_per_
                     values = NULL
                     context = exporter_contexts[i]
                     exporter = _export_get_exporter(context.get_valuetype_id())
-                    error = exporter(context, row_offset, rows_per_slice, &values)
+                    error = exporter(context, row_offset, rows_to_export, &values)
                     if error != sbdf_c.SBDF_OK:
                         raise SBDFError(f"error exporting column '{column_names[i]}': "
                                         f"{sbdf_c.sbdf_err_get_str(error).decode('utf-8')}")
@@ -2162,7 +2162,7 @@ def export_chunked_data(sbdf_file, default_column_name="x", Py_ssize_t rows_per_
                         raise SBDFError(f"error creating column slice: {sbdf_c.sbdf_err_get_str(error).decode('utf-8')}")
     
                     # Create the invalid array
-                    error, invalid_array = _export_process_invalid_array(context, row_offset, rows_per_slice, col_slice)
+                    error, invalid_array = _export_process_invalid_array(context, row_offset, rows_to_export, col_slice)
                     if invalid_array != NULL:
                         _allocated_list_add(&saved_value_arrays, invalid_array)
                     if error != sbdf_c.SBDF_OK:
@@ -2182,9 +2182,10 @@ def export_chunked_data(sbdf_file, default_column_name="x", Py_ssize_t rows_per_
                 _allocated_list_done(&saved_value_arrays, <_allocated_dealloc_fn>sbdf_c.sbdf_va_destroy)
             
                 # Next slice!
-                row_offset += rows_per_slice
+                row_offset += rows_to_export
                 
             is_first_obj = False
+            row_offset = 0
         
     finally:
     # Write the end-of-table marker
