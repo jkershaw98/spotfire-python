@@ -27,6 +27,7 @@ from vendor cimport sbdf_c
 
 from tqdm.notebook import tqdm
 import polars as pl
+from queue import Empty
 
 
 # Dynamically load optional modules
@@ -2196,6 +2197,28 @@ def export_chunked_data(sbdf_file, default_column_name="x", Py_ssize_t rows_per_
         # Close the output file
         if output_file != NULL:
             stdio.fclose(output_file)
+            
+def export_queued_data(input_queue, output_queue, file_path, **kwargs):
+    '''Bit of a hacky workaround to use a second process in ipython
+    Requires an input and output queue to send data between processes
+    passes filepath and all kwargs on to the export_chunked_data function
+    '''
+    chunk_exporter = export_chunked_data(file_path, **kwargs)
+    next(chunk_exporter)  # Start the generator
+    try:
+        while True:
+            try:
+                data_in = input_queue.get(timeout=1)  # Wait for 1 second for new data
+                if data_in is None:
+                    break
+                chunk_exporter.send(data_in)
+            except Empty:
+                continue
+    except Exception as e:
+        output_queue.put(f"Error in chunk_exporter: {str(e)}")
+    finally:
+        chunk_exporter.close()
+        output_queue.put("chunk_exporter completed")
 
 def convert_csv_to_sbdf(csv_file, sbdf_file, dtypes_dict, Py_ssize_t chunksize=10000, encoding_rle=True, has_typerow=False):
     """Export data to an SBDF file.
