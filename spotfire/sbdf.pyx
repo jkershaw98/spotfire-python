@@ -2203,15 +2203,27 @@ def export_queued_data(input_queue, output_queue, file_path, **kwargs):
     Requires an input and output queue to send data between processes
     passes filepath and all kwargs on to the export_chunked_data function
     '''
+    count = 0
+    
+    iterable = kwargs.pop('iterable', None)
+    if iterable is not None:
+        return_counts = True
+    else:
+        return_counts = False
+    
+    
     chunk_exporter = export_chunked_data(file_path, **kwargs)
-    next(chunk_exporter)  # Start the generator
+    next(chunk_exporter)
     try:
         while True:
             try:
-                data_in = input_queue.get(timeout=1)  # Wait for 1 second for new data
+                data_in = input_queue.get(timeout=1)
                 if data_in is None:
                     break
                 chunk_exporter.send(data_in)
+                if return_counts:
+                    output_queue.put(len(iterable[count]))
+                    count += 1
             except Empty:
                 continue
     except Exception as e:
